@@ -5,10 +5,10 @@
 #include <stdlib.h>
 #include <math.h>
 
-const int N = 300;
-const int M = 75;
+const int N = 100;
+const int M = 25;
 double h = 1./(N + 1);
-double eps = 1e-5;
+double eps = 1e-13;
 int k = 0;
 
 double u[M+2][N+2];
@@ -122,56 +122,35 @@ int main(int argc, char ** argv) {
 
 	fprintf(stderr, "Calculating time for single process %f and number of iterations %d\n", end - start, number_of_iterations);
 
-
-	double** ans;
+	double** ANS;
 
 	if (myrank == 0) {
-		ans = malloc(N * N * sizeof(double*));
-		for (int i=0; i<N*N; i++)
-			ans[i] = malloc(3 * sizeof(double));
-		for (int i=1; i<M+1; i++) {
-					for (int j=1; j<N+1; j++) {
-						ans[k][0] = i * h;
-						ans[k][1] = j * h;
-						ans[k][2] = u[i][j];
-						k += 1;
-					}
-			}		
+		ANS = malloc((N + 1) * sizeof(double*));
+		for (int i = 0; i < N + 1; i++)
+			ANS[i] = malloc((N + 2) * sizeof(double));
 
-		for (int p=1; p<ranksize; p++) {
-			for (int i=1; i<M+1; i++) {
-					for (int j=1; j<N+1; j++) {
-						double f[3];
-						MPI_Recv(f, 3, MPI_DOUBLE, p, 98, MPI_COMM_WORLD, &status);
-						ans[k][0] = f[0];
-						ans[k][1] = f[1];
-						ans[k][2] = f[2];
-						k += 1;
-					}
-			}
-		}
+		for (int i=1; i<M+1; i++)
+			for (int j=0; j<N+2; j++)
+				ANS[i][j] = u[i][j];
+
+		for (int p=1; p<ranksize; p++)
+			for (int i=1; i<M+1; i++)
+				MPI_Recv(ANS[i + p * M], N+2, MPI_DOUBLE, p, 98, MPI_COMM_WORLD, &status);
 		
 	} else {
-			for (int i=1; i<M+1; i++) {
-					for (int j=1; j<N+1; j++) {
-						double f[3];
-						f[0] = (myrank * M + i - 1) * h;
-						f[1] = j * h;
-						f[2] = u[i][j];
-						MPI_Send(f, 3, MPI_DOUBLE, 0, 98, MPI_COMM_WORLD);
-					}
-			}
+		for (int i=1; i<M+1; i++)
+			MPI_Send(u[i], N+2, MPI_DOUBLE, 0, 98, MPI_COMM_WORLD);
 	}
-
 
 	MPI_Barrier (MPI_COMM_WORLD);
 	
 	if (myrank == 0) {
 		fprintf(stderr, "Number of dots %d\n", k);
 		freopen("output.txt", "w", stdout);
-		for (int i=0; i<k; i++){
-				printf("%f %f %f\n", ans[i][0], ans[i][1], ans[i][2]);
-			}
+
+		for (int i=1; i<N+1; i++)
+		for (int j=1; j<N+1; j++)
+			printf("%f %f %f\n", i*h, j*h, ANS[i][j]);
 	}
 
 	MPI_Finalize ();
