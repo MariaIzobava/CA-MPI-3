@@ -5,20 +5,16 @@
 #include <stdlib.h>
 #include <math.h>
 
-const int N = 100;
-const int M = 25;
+const int N = 300;
+const int M = 75;
 double h = 1./(N + 1);
-double eps = 1e-13;
-double ans[6*N*M + 10][3];
-int NP = 4;
+double eps = 1e-5;
 int k = 0;
 
 double u[M+2][N+2];
 
-double u2[N+2][N+2];
-
 double f1(double y) {
-	return y*y;
+	return 1. - y*y;
 
 }
 
@@ -31,7 +27,7 @@ double f2(double y) {
 }
 
 double f4(double y) {
-	return y*y;
+	return 1. - y*y;
 }
 
 double F(double x, double y) {
@@ -49,6 +45,10 @@ int main(int argc, char ** argv) {
 	MPI_Comm_rank (MPI_COMM_WORLD, &myrank);    /* my place in MPI system */
 	MPI_Comm_size (MPI_COMM_WORLD, &ranksize);  /* size of MPI system */
 
+	if (N % M != 0 || N / M != ranksize) {
+		printf("Wrong default values!\n");
+	}
+
 	double start = MPI_Wtime();
 	for (int i=0; i < M+2; i++)
 		for (int j=0; j < N+2; j++)
@@ -62,7 +62,7 @@ int main(int argc, char ** argv) {
 	}
 
 
-	if (myrank == NP-1) {
+	if (myrank == ranksize-1) {
 		for (int i = 1; i < N + 1; i++) {
 			u[M+1][i] = f3(i * h);
 		}
@@ -75,23 +75,24 @@ int main(int argc, char ** argv) {
 	}
 
 
-int kl=0;
+	int number_of_iterations=0;
 
 	while (1) {
-		kl++;
-		if (myrank < NP - 1) 
+		number_of_iterations++;
+		if (myrank < ranksize - 1) 
 			MPI_Send(u[M], N+2, MPI_DOUBLE, myrank + 1, 98, MPI_COMM_WORLD);
 
 		if (myrank > 0)
 			MPI_Recv(u[0], N+2, MPI_DOUBLE, myrank-1, 98, MPI_COMM_WORLD, &status);
-		
+
 		MPI_Barrier (MPI_COMM_WORLD);
 
 		if (myrank > 0) 
 			MPI_Send(u[1], N+2, MPI_DOUBLE, myrank - 1, 98, MPI_COMM_WORLD);
 
-		if (myrank < NP - 1)
+		if (myrank < ranksize - 1)
 			MPI_Recv(u[M+1], N+2, MPI_DOUBLE, myrank + 1, 98, MPI_COMM_WORLD, &status);
+
 		MPI_Barrier (MPI_COMM_WORLD);
 		double dmax = 0.;
 		for (int i=1; i<M+1; i++)
@@ -111,22 +112,25 @@ int kl=0;
 				if (r > dmax)
 					dmax = r;
 			}
-			//printf("%f\n", dmax);
 		}
 		MPI_Barrier (MPI_COMM_WORLD);
 		MPI_Bcast(&dmax, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 		if (dmax < eps) break;
-		//break;
-	
 	}
 
 	double end = MPI_Wtime();
 
-	fprintf(stderr, "Calculating time for single process %f %d\n", end - start, kl);
+	fprintf(stderr, "Calculating time for single process %f and number of iterations %d\n", end - start, number_of_iterations);
+
+
+	double** ans;
 
 	if (myrank == 0) {
+		ans = malloc(N * N * sizeof(double*));
+		for (int i=0; i<N*N; i++)
+			ans[i] = malloc(3 * sizeof(double));
 		for (int i=1; i<M+1; i++) {
-					for (int j=0; j<N+2; j++) {
+					for (int j=1; j<N+1; j++) {
 						ans[k][0] = i * h;
 						ans[k][1] = j * h;
 						ans[k][2] = u[i][j];
@@ -136,7 +140,7 @@ int kl=0;
 
 		for (int p=1; p<ranksize; p++) {
 			for (int i=1; i<M+1; i++) {
-					for (int j=0; j<N+2; j++) {
+					for (int j=1; j<N+1; j++) {
 						double f[3];
 						MPI_Recv(f, 3, MPI_DOUBLE, p, 98, MPI_COMM_WORLD, &status);
 						ans[k][0] = f[0];
@@ -149,9 +153,9 @@ int kl=0;
 		
 	} else {
 			for (int i=1; i<M+1; i++) {
-					for (int j=0; j<N+2; j++) {
+					for (int j=1; j<N+1; j++) {
 						double f[3];
-						f[0] = (myrank * M + i) * h;
+						f[0] = (myrank * M + i - 1) * h;
 						f[1] = j * h;
 						f[2] = u[i][j];
 						MPI_Send(f, 3, MPI_DOUBLE, 0, 98, MPI_COMM_WORLD);
@@ -159,11 +163,12 @@ int kl=0;
 			}
 	}
 
+
 	MPI_Barrier (MPI_COMM_WORLD);
-
-
-	freopen("output.txt", "w", stdout);
+	
 	if (myrank == 0) {
+		fprintf(stderr, "Number of dots %d\n", k);
+		freopen("output.txt", "w", stdout);
 		for (int i=0; i<k; i++){
 				printf("%f %f %f\n", ans[i][0], ans[i][1], ans[i][2]);
 			}
